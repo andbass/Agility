@@ -1,0 +1,8 @@
+{
+    "title": "Agility",
+    "type": "ServerContent",
+    "tags": ["fun"],
+    "ignore": [
+        ".git*"
+    ]
+}
