@@ -9,9 +9,13 @@ local releaseWaitTime = 0.2
 
 local jumpOffPower = 250
 local wallJumpPower = 300
+local slideMultiplier = 1.5
 
-local slidingSlowdown = 75
+local slidingSlowdown = 100
 local slidingSlopeBoost = 500
+
+local shootDodgeSpeed = 400
+local shootDodgeStandUpDelay = 1.5
 
 local ledgeImpactSounds = {}
 for i = 1, 6 do
@@ -22,6 +26,8 @@ local ledgeVaultSounds = {}
 for i = 1, 7 do
     table.insert(ledgeVaultSounds, Sound(Format("physics/body/body_medium_impact_soft%d.wav", i)))
 end
+
+local enemies = {}
 
 local function LedgeTrace(ply)
     local camPos = ply:GetShootPos()
@@ -173,7 +179,7 @@ local function WallJumpTrace(ply, direction)
 end
 
 local function WallJump(ply, wallJumpTrace, direction)
-    local jumpDir = (ply:GetRight() * -direction + ply:GetUp() * 1.5):GetNormalized()
+    local jumpDir = (ply:GetRight() * -direction + ply:GetUp()):GetNormalized()
 
     ply:SetVelocity(Vector(0, 0, -ply:GetVelocity().z) + jumpDir * wallJumpPower)
     ply:ViewPunch(Angle(-10, 0, 15 * -direction))
@@ -189,7 +195,7 @@ local function StartSliding(ply)
     ply.SlideDir = ply:GetVelocity():GetNormalized()
     ply.RightSlideDir = ply.SlideDir:Cross(ply:GetUp())
 
-    ply.SlideSpeed = ply:GetVelocity():Length() * 1.5
+    ply.SlideSpeed = ply:GetVelocity():Length() * slideMultiplier
     ply:ViewPunch(Angle(-10, 0, 0))
 end
 
@@ -237,6 +243,84 @@ local function SlidingTick(ply, moveData)
     ply.SlideVel = vel
 end
 
+local function ShootDodge(ply)
+    ply.IsShootDodging = true
+    ply.TimeToCheckShootDodgeLiftedOff = CurTime() + 0.3
+
+    local desiredForwardDir = ply:KeyDown(IN_FORWARD) and ply:GetForward() or ply:KeyDown(IN_BACK) and -ply:GetForward() or Vector(0, 0, 0)
+    local desiredRightDir = ply:KeyDown(IN_MOVERIGHT) and ply:GetRight() or ply:KeyDown(IN_MOVELEFT) and -ply:GetRight() or Vector(0, 0, 0)
+
+    ply.ShootDodgeDir = (desiredForwardDir + desiredRightDir):GetNormalized()
+    ply.RightShootDodgeDir = ply.ShootDodgeDir:Cross(ply:GetUp())
+
+    local plyPos = ply:GetPos()
+    plyPos.z = plyPos.z + 1
+
+    ply:SetPos(plyPos)
+
+    local bottom, top = ply:GetHullDuck()
+    top.z = top.z * 0.25
+    bottom.z = 5
+
+    ply:SetHull(bottom, top)
+    ply:SetHullDuck(bottom, top)
+
+    ply.OldDuckView = ply:GetViewOffsetDucked()
+    ply.OldDuckSpeed = ply:GetCrouchedWalkSpeed()
+
+    ply:SetViewOffsetDucked(ply.OldDuckView * Vector(1, 1, 0.5))
+
+    local shootDodgeVel = ply:GetVelocity():GetNormalized() * shootDodgeSpeed + ply:GetUp() * 275
+
+    ply:SetVelocity(shootDodgeVel - ply:GetVelocity())
+    ply:SetPos(ply:GetPos() + Vector(0, 0, 10))
+
+    ply:ViewPunch(Angle(ply.ShootDodgeDir:Dot(ply:GetForward()) * 12.5, 0, ply.ShootDodgeDir:Dot(ply:GetRight()) * 20))
+    ply:SetCrouchedWalkSpeed(0)
+end
+
+local function ShootDodgeTick(ply, moveData)
+    moveData:AddKey(IN_DUCK)
+    moveData:SetSideSpeed(0)
+    moveData:SetForwardSpeed(math.abs(moveData:GetForwardSpeed()))
+
+    -- TODO move view tilting code into seperate function
+    local forwardness = math.abs(ply:GetAimVector():Dot(ply.ShootDodgeDir))
+    local rollDir = ply:GetForward():Dot(ply.RightShootDodgeDir) > 0 and -1 or 1
+
+    local dodgeRoll = math.deg(math.acos(forwardness)) * 0.35 * rollDir
+
+    local curRoll = ply:EyeAngles().roll
+    local newAngle = Angle(ply:EyeAngles().pitch, ply:EyeAngles().yaw, Lerp(10 * FrameTime(), curRoll, dodgeRoll))
+
+    ply:SetEyeAngles(newAngle)
+
+    ply.ShootDodgeLiftedOff = ply.ShootDodgeLiftedOff or (ply:OnGround() and CurTime() > ply.TimeToCheckShootDodgeLiftedOff)
+
+    if ply:OnGround() and ply.ShootDodgeLiftedOff then
+        ply.TimeToCheckShootDodge = ply.TimeToCheckShootDodge or CurTime() + shootDodgeStandUpDelay
+    end
+end
+
+local function StopShootDodge(ply)
+    ply.IsShootDodging = false
+    ply.TimeToCheckShootDodge = false
+    ply.ShootDodgeLiftedOff = false
+
+    local eyes = ply:EyeAngles()
+    eyes.roll = 0
+
+    ply:SetEyeAngles(eyes)
+    ply:SetCrouchedWalkSpeed(ply.OldDuckSpeed)
+
+    timer.Simple(0.26, function()
+        ply:SetPos(ply:GetPos() + Vector(0, 0, 5))
+        ply:SetViewOffsetDucked(ply.OldDuckView)
+
+        ply:ResetHull()
+    end)
+end
+
 local function PlayerTick(ply, moveData)
     if ply.GrabbedLedge then
         LedgeTick(ply, moveData)
@@ -246,6 +330,12 @@ local function PlayerTick(ply, moveData)
         end
 
         return
+    elseif ply.IsShootDodging then
+        if (ply.TimeToCheckShootDodge and CurTime() > ply.TimeToCheckShootDodge) or ply:GetMoveType() == MOVETYPE_LADDER or ply:GetMoveType() == MOVETYPE_NOCLIP then
+            StopShootDodge(ply)
+        else
+            ShootDodgeTick(ply, moveData)
+        end
     end
 
     if not ply:OnGround() and ply:GetMoveType() ~= MOVETYPE_LADDER and ply:GetMoveType() ~= MOVETYPE_NOCLIP then
@@ -289,7 +379,11 @@ hook.Add("KeyPress", "agility_PlayerKeyPress", function(ply, key)
         StartSliding(ply)
     elseif ply.IsSliding and key == IN_JUMP then
         StopSliding(ply)
-    elseif key == IN_USE and ply:KeyDown(IN_SPEED) then
-        -- Shoot dodge
+    elseif not ply.IsShootDodging and key == IN_USE and ply:KeyDown(IN_SPEED) and ply:OnGround() then
+        ShootDodge(ply)
     end
+end)
+
+hook.Add("OnEntityCreated", function(ent)
+
 end)
