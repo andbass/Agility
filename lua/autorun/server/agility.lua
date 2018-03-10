@@ -9,13 +9,15 @@ local releaseWaitTime = 0.2
 
 local jumpOffPower = 250
 local wallJumpPower = 300
-local slideMultiplier = 1.5
+local slideMultiplier = 1.25
 
 local slidingSlowdown = 100
 local slidingSlopeBoost = 500
 
-local shootDodgeSpeed = 400
-local shootDodgeStandUpDelay = 1.5
+local shootDodgeTimescale = 0.15
+local shootDodgeSpeed = 425
+local shootDodgeUpwardSpeed = 275
+local shootDodgeStandUpDelay = 1
 
 local ledgeImpactSounds = {}
 for i = 1, 6 do
@@ -252,6 +254,7 @@ local function ShootDodge(ply)
 
     ply.ShootDodgeDir = (desiredForwardDir + desiredRightDir):GetNormalized()
     ply.RightShootDodgeDir = ply.ShootDodgeDir:Cross(ply:GetUp())
+    ply.ShootDodgeForwardness = ply.ShootDodgeDir:Dot(ply:GetForward())
 
     local plyPos = ply:GetPos()
     plyPos.z = plyPos.z + 1
@@ -260,7 +263,7 @@ local function ShootDodge(ply)
 
     local bottom, top = ply:GetHullDuck()
     top.z = top.z * 0.25
-    bottom.z = 5
+    bottom.z = 1
 
     ply:SetHull(bottom, top)
     ply:SetHullDuck(bottom, top)
@@ -270,34 +273,63 @@ local function ShootDodge(ply)
 
     ply:SetViewOffsetDucked(ply.OldDuckView * Vector(1, 1, 0.5))
 
-    local shootDodgeVel = ply:GetVelocity():GetNormalized() * shootDodgeSpeed + ply:GetUp() * 275
+    local shootDodgeVel = ply.ShootDodgeDir * shootDodgeSpeed + ply:GetUp() * shootDodgeUpwardSpeed
 
     ply:SetVelocity(shootDodgeVel - ply:GetVelocity())
-    ply:SetPos(ply:GetPos() + Vector(0, 0, 10))
 
-    ply:ViewPunch(Angle(ply.ShootDodgeDir:Dot(ply:GetForward()) * 12.5, 0, ply.ShootDodgeDir:Dot(ply:GetRight()) * 20))
+    ply:ViewPunch(Angle(ply.ShootDodgeDir:Dot(ply:GetForward()) * 5, 0, ply.ShootDodgeDir:Dot(ply:GetRight()) * 15))
     ply:SetCrouchedWalkSpeed(0)
+
+    -- Update enemy accuracy
+    for i, npc in ipairs(ply.Enemies) do
+        npc.OldAccuracy = npc:GetCurrentWeaponProficiency()
+        npc:SetCurrentWeaponProficiency(0)
+    end
+
+    ply.OldTimeScale = game.GetTimeScale()
+    game.SetTimeScale(shootDodgeTimescale)
+end
+
+local function ShootDodgeHitGround(ply)
+    -- In the event shoot dodging ends before player hits ground, reset everything again
+    game.SetTimeScale(ply.OldTimeScale)
+
+    for i, npc in ipairs(ply.Enemies) do
+        if npc.OldAccuracy then
+            npc:SetCurrentWeaponProficiency(npc.OldAccuracy)
+        end
+    end
 end
 
 local function ShootDodgeTick(ply, moveData)
     moveData:AddKey(IN_DUCK)
     moveData:SetSideSpeed(0)
-    moveData:SetForwardSpeed(math.abs(moveData:GetForwardSpeed()))
+
+    if not ply:OnGround() then
+        moveData:SetForwardSpeed(math.abs(moveData:GetForwardSpeed()) * ply.ShootDodgeForwardness)
+    else 
+        moveData:SetForwardSpeed(0)
+    end
 
     -- TODO move view tilting code into seperate function
-    local forwardness = math.abs(ply:GetAimVector():Dot(ply.ShootDodgeDir))
+    local aimDir = ply:GetAimVector()
+    aimDir.z = 0
+    aimDir:Normalize()
+
+    local forwardness = math.abs(aimDir:Dot(ply.ShootDodgeDir))
     local rollDir = ply:GetForward():Dot(ply.RightShootDodgeDir) > 0 and -1 or 1
 
     local dodgeRoll = math.deg(math.acos(forwardness)) * 0.35 * rollDir
 
     local curRoll = ply:EyeAngles().roll
-    local newAngle = Angle(ply:EyeAngles().pitch, ply:EyeAngles().yaw, Lerp(10 * FrameTime(), curRoll, dodgeRoll))
+    local newAngle = Angle(ply:EyeAngles().pitch, ply:EyeAngles().yaw, Lerp(20 * FrameTime(), curRoll, dodgeRoll))
 
     ply:SetEyeAngles(newAngle)
 
     ply.ShootDodgeLiftedOff = ply.ShootDodgeLiftedOff or (ply:OnGround() and CurTime() > ply.TimeToCheckShootDodgeLiftedOff)
 
     if ply:OnGround() and ply.ShootDodgeLiftedOff then
+        ShootDodgeHitGround(ply)
         ply.TimeToCheckShootDodge = ply.TimeToCheckShootDodge or CurTime() + shootDodgeStandUpDelay
     end
 end
@@ -306,6 +338,8 @@ local function StopShootDodge(ply)
     ply.IsShootDodging = false
     ply.TimeToCheckShootDodge = false
     ply.ShootDodgeLiftedOff = false
+
+    ShootDodgeHitGround(ply)
 
     local eyes = ply:EyeAngles()
     eyes.roll = 0
@@ -355,7 +389,20 @@ local function PlayerTick(ply, moveData)
     end
 end
 
+local function UpdateEnemiesForPlayer(ply)
+    for i, ent in ipairs(ents.FindByClass("npc_*")) do
+        if ent:IsNPC() and ent:Disposition(ply) == D_HT then
+            table.insert(ply.Enemies, ent)
+        end
+    end
+end
+
 hook.Add("PlayerTick", "agility_PlayerTick", PlayerTick)
+
+hook.Add("PlayerSpawn", "agility_PlayerSpawn", function(ply)
+    ply.Enemies = {}
+    UpdateEnemiesForPlayer(ply)
+end)
 
 hook.Add("KeyPress", "agility_PlayerKeyPress", function(ply, key)
     if ply.GrabbedLedge then 
@@ -384,6 +431,30 @@ hook.Add("KeyPress", "agility_PlayerKeyPress", function(ply, key)
     end
 end)
 
-hook.Add("OnEntityCreated", function(ent)
+hook.Add("OnEntityCreated", "agility_EntityCreation", function(ent)
+    if ent:IsNPC() then
+        for i, ply in ipairs(player.GetAll()) do
+            if ent:Disposition(ply) == D_HT then
+                table.insert(ply.Enemies, ent)
+            end
+        end
+    end
+end)
 
+hook.Add("EntityRemoved", "agility_EntityRemoved", function(ent)
+    if ent:IsNPC() then
+        for i, ply in ipairs(player.GetAll()) do
+            if ent:Disposition(ply) == D_HT then
+                table.RemoveByValue(ply.Enemies, ent)
+            end
+        end
+    end
+end)
+
+hook.Add("OnNPCKilled", "agility_NPCKilled", function(npc)
+    for i, ply in ipairs(player.GetAll()) do
+        if npc:Disposition(ply) == D_HT then
+            table.RemoveByValue(ply.Enemies, npc)
+        end
+    end
 end)
