@@ -183,7 +183,7 @@ end
 local function WallJump(ply, wallJumpTrace, direction)
     local jumpDir = (ply:GetRight() * -direction + ply:GetUp()):GetNormalized()
 
-    ply:SetVelocity(Vector(0, 0, -ply:GetVelocity().z) + jumpDir * wallJumpPower)
+    ply:SetVelocity(Vector(0, 0, -ply:GetVelocity().z) + jumpDir * wallJumpPower + ply:GetUp() * wallJumpPower * 0.1)
     ply:ViewPunch(Angle(-10, 0, 15 * -direction))
 
     local sound = table.Random(ledgeImpactSounds)
