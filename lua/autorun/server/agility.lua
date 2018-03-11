@@ -424,7 +424,7 @@ hook.Add("KeyPress", "agility_PlayerKeyPress", function(ply, key)
         return
     end
 
-    if not ply:OnGround() and key == IN_JUMP and (ply:KeyDown(IN_MOVELEFT) or ply:KeyDown(IN_MOVERIGHT)) then
+    if not ply.IsShootDodging and not ply:OnGround() and key == IN_JUMP and (ply:KeyDown(IN_MOVELEFT) or ply:KeyDown(IN_MOVERIGHT)) then
         local direction = ply:KeyDown(IN_MOVELEFT) and 1 or -1
         local wallJumpTrace = WallJumpTrace(ply, direction)
 
