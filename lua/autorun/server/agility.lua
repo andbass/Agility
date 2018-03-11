@@ -1,4 +1,7 @@
 
+-- Client files
+AddCSLuaFile("agility/spring.lua")
+
 -- Determines how far or high a ledge can be in order to be grabbale by the player
 local ledgeReachUpwards = 40
 local ledgeReachOutwards = 15
@@ -9,7 +12,7 @@ local releaseWaitTime = 0.2
 
 local jumpOffPower = 250
 local wallJumpPower = 300
-local slideMultiplier = 1.25
+local slideMultiplier = 1.5
 
 local slidingSlowdown = 100
 local slidingSlopeBoost = 500
@@ -43,7 +46,7 @@ local function LedgeTrace(ply)
         mins = Vector(-16, -16, -16),
         maxs = Vector(16, 16, 16),
 
-        mask = MASK_ALL,
+        mask = MASK_SOLID,
     }
 
     local rightHandTrace = util.TraceHull {
@@ -55,7 +58,7 @@ local function LedgeTrace(ply)
         mins = Vector(-16, -16, -16),
         maxs = Vector(16, 16, 16),
 
-        mask = MASK_ALL,
+        mask = MASK_SOLID,
     }
 
     if not leftHandTrace.Hit or not rightHandTrace.Hit then 
@@ -95,7 +98,13 @@ local function IsLedgeDetected(ply, ledgeTrace)
 
     local isPlayerLookingAtLedge = ply:GetAimVector():Dot(ply.DirToLedge) > 0.1
 
-    return timeDiff > releaseWaitTime and not roofTrace.Hit and ledgeTrace.Hit and not ply:Crouching() and isSurfaceLedge and isLedgeHighEnough and isPlayerLookingAtLedge
+    return timeDiff > releaseWaitTime 
+        and not roofTrace.Hit 
+        and ledgeTrace.Hit 
+        and not ply:Crouching() 
+        and isSurfaceLedge 
+        and isLedgeHighEnough 
+        and isPlayerLookingAtLedge
 end
 
 local function DeattachFromLedge(ply)
@@ -365,7 +374,7 @@ local function PlayerTick(ply, moveData)
 
         return
     elseif ply.IsShootDodging then
-        if (ply.TimeToCheckShootDodge and CurTime() > ply.TimeToCheckShootDodge) or ply:GetMoveType() == MOVETYPE_LADDER or ply:GetMoveType() == MOVETYPE_NOCLIP then
+        if (ply.TimeToCheckShootDodge and CurTime() > ply.TimeToCheckShootDodge) or ply:GetMoveType() == MOVETYPE_LADDER or ply:WaterLevel() > 0 or ply:GetMoveType() == MOVETYPE_NOCLIP then
             StopShootDodge(ply)
         else
             ShootDodgeTick(ply, moveData)
