@@ -1,4 +1,8 @@
 
+-- Network messages
+util.AddNetworkString("LedgeGrabbed")
+util.AddNetworkString("LedgeReleased")
+
 -- Client files
 AddCSLuaFile("agility/spring.lua")
 
@@ -112,6 +116,10 @@ local function DeattachFromLedge(ply)
     ply.GrabbedLedge = false
 
     ply.ReleaseLedgeTime = CurTime()
+
+    -- Tell client
+    net.Start("LedgeReleased")
+    net.Send(ply)
 end
 
 local function AttachToLedge(ply, ledgeTrace)
@@ -140,6 +148,10 @@ local function AttachToLedge(ply, ledgeTrace)
 
     local sound = table.Random(ledgeImpactSounds)
     ply:EmitSound(sound)
+
+    -- Tell client
+    net.Start("LedgeGrabbed")
+    net.Send(ply)
 end
 
 local function VaultLedge(ply)
