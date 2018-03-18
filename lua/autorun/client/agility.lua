@@ -1,8 +1,8 @@
 
 include("agility/spring.lua")
 
-spring = Spring.New(0, 0, {
-    Strength = 150.0,
+local spring = Spring.New(0, 0, {
+    Strength = 200.0,
     Damping = 0.0001,
 })
 

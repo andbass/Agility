@@ -15,15 +15,15 @@ local ledgeHandGap = 20
 local releaseWaitTime = 0.2
 
 local jumpOffPower = 250
-local wallJumpPower = 300
-local slideMultiplier = 1.5
+local wallJumpPower = 250
+local slideMultiplier = 1.4
 
 local slidingSlowdown = 100
 local slidingSlopeBoost = 500
 
 local shootDodgeTimescale = 0.15
 local shootDodgeSpeed = 425
-local shootDodgeUpwardSpeed = 275
+local shootDodgeUpwardSpeed = 285
 local shootDodgeStandUpDelay = 1
 
 local ledgeImpactSounds = {}
@@ -140,7 +140,7 @@ local function AttachToLedge(ply, ledgeTrace)
     if ply.GrabbedDist > 70 then
         ply.TimeToCheckVault = CurTime() + ply.GrabbedDist * 0.002
     else
-        ply.TimeToCheckVault = CurTime()
+        ply.TimeToCheckVault = CurTime() + ply.GrabbedDist * 0.001
     end
 
     ply:SetVelocity(-ply:GetVelocity())
@@ -283,7 +283,7 @@ local function ShootDodge(ply)
     ply:SetPos(plyPos)
 
     local bottom, top = ply:GetHullDuck()
-    top.z = top.z * 0.25
+    top.z = top.z * 0.2
     bottom.z = 1
 
     ply:SetHull(bottom, top)
