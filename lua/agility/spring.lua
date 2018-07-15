@@ -1,3 +1,4 @@
+-- 
 -- Support for spring interpolation
 -- See "https://github.com/David20321/7DFPS/blob/master/UnityProject/Assets/Scripts/AimScript.js", the Spring class for more info
 -- I did not come up with this, code adapted from Wolfire's 7Day FPS gamejam entry, Receiver
@@ -10,7 +11,7 @@
 Spring = {}
 
 function Spring.New(state, target, props)
-    self = { 
+    local self = { 
         State = state,
         Target = target,
         Vel = 0,
@@ -41,6 +42,11 @@ end
 
 function Spring:Active()
     return self:Speed() > 1e-1
+end
+
+function Spring:Reset(state)
+    self.State = state
+    self.Vel = 0
 end
 
 setmetatable(Spring, { __call = Spring.new })
