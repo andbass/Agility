@@ -4,23 +4,23 @@ local cvar = include "agility/cvars.lua"
 
 local ammoMultipliers = {
     Pistol = {
-        Damage = 1.0,
+        Damage = 0.9,
         Force = 1.0,
     },
     Buckshot = {
-        Damage = 1.5,
+        Damage = 0.6,
         Force = 1.5,
     },
     AR2 = {
-        Damage = 0.8,
+        Damage = 0.75,
         Force = 1.0,
     },
     SMG1 = {
-        Damage = 0.8,
+        Damage = 0.6,
         Force = 0.8,
     },
     ["357"] = {
-        Damage = 2.5,
+        Damage = 2.0,
         Force = 2.5,
     }
 }
@@ -38,7 +38,7 @@ local function ComputeMultipliers(data)
     end
 
     return {
-        Damage = math.log(data.Damage) * 0.75,
+        Damage = math.log(data.Damage) * 0.5,
         Force = math.log(data.Force) * 0.5,
     }
 end
