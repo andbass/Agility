@@ -1,10 +1,10 @@
 
 -- Network messages
-util.AddNetworkString("LedgeGrabbed")
-util.AddNetworkString("LedgeReleased")
+util.AddNetworkString "LedgeGrabbed"
+util.AddNetworkString "LedgeReleased"
 
 -- Client files
-AddCSLuaFile("agility/spring.lua")
+AddCSLuaFile "agility/spring.lua"
 
 -- Determines how far or high a ledge can be in order to be grabbale by the player
 local ledgeReachUpwards = 40
@@ -15,8 +15,10 @@ local ledgeHandGap = 20
 local releaseWaitTime = 0.2
 
 local jumpOffPower = 250
-local wallJumpPower = 250
 local slideMultiplier = 1.4
+
+local wallJumpPower = 250
+local wallJumpDelay = 0.35
 
 local slidingSlowdown = 100
 local slidingSlopeBoost = 500
@@ -25,6 +27,8 @@ local shootDodgeTimescale = 0.15
 local shootDodgeSpeed = 425
 local shootDodgeUpwardSpeed = 285
 local shootDodgeStandUpDelay = 1
+
+local slomoSpeedMultiplier = 2.5
 
 local ledgeImpactSounds = {}
 for i = 1, 6 do
@@ -35,8 +39,6 @@ local ledgeVaultSounds = {}
 for i = 1, 7 do
     table.insert(ledgeVaultSounds, Sound(Format("physics/body/body_medium_impact_soft%d.wav", i)))
 end
-
-local enemies = {}
 
 local function LedgeTrace(ply)
     local camPos = ply:GetShootPos()
@@ -101,6 +103,7 @@ local function IsLedgeDetected(ply, ledgeTrace)
     ply.DirToLedge = (ledgeTrace.HitPos - ply:GetShootPos()):GetNormalized()
 
     local isPlayerLookingAtLedge = ply:GetAimVector():Dot(ply.DirToLedge) > 0.1
+    local isLedgeStable = ledgeTrace.Entity:GetVelocity():LengthSqr() < 100.0 * 100.0
 
     return timeDiff > releaseWaitTime 
         and not roofTrace.Hit 
@@ -109,6 +112,7 @@ local function IsLedgeDetected(ply, ledgeTrace)
         and isSurfaceLedge 
         and isLedgeHighEnough 
         and isPlayerLookingAtLedge
+        and isLedgeStable
 end
 
 local function DeattachFromLedge(ply)
@@ -189,6 +193,8 @@ local function LedgeTick(ply, moveData)
 end
 
 local function WallJumpTrace(ply, direction)
+    ply.LastWallJump = CurTime()
+
     local tracePos = ply:GetPos() + ply:GetRight() * direction * 16
     return util.TraceHull {
         start = tracePos,
@@ -250,9 +256,11 @@ local function SlidingTick(ply, moveData)
     local rollDir = ply:GetForward():Dot(ply.RightSlideDir) > 0 and 1 or -1
 
     local slideRoll = math.deg(math.acos(forwardness)) * 0.25 * rollDir
-
     local curRoll = ply:EyeAngles().roll
-    local newAngle = Angle(ply:EyeAngles().pitch, ply:EyeAngles().yaw, Lerp(10 * FrameTime(), curRoll, slideRoll))
+    local newRoll = Lerp(10 * FrameTime(), curRoll, slideRoll)
+
+    local newAngle = Angle(ply:EyeAngles())
+    newAngle.roll = newRoll
 
     ply:SetEyeAngles(newAngle)
     
@@ -278,12 +286,12 @@ local function ShootDodge(ply)
     ply.ShootDodgeForwardness = ply.ShootDodgeDir:Dot(ply:GetForward())
 
     local plyPos = ply:GetPos()
-    plyPos.z = plyPos.z + 1
+    plyPos.z = plyPos.z + 5
 
     ply:SetPos(plyPos)
 
     local bottom, top = ply:GetHullDuck()
-    top.z = top.z * 0.2
+    top.z = top.z * 0.1
     bottom.z = 1
 
     ply:SetHull(bottom, top)
@@ -292,7 +300,7 @@ local function ShootDodge(ply)
     ply.OldDuckView = ply:GetViewOffsetDucked()
     ply.OldDuckSpeed = ply:GetCrouchedWalkSpeed()
 
-    ply:SetViewOffsetDucked(ply.OldDuckView * Vector(1, 1, 0.5))
+    ply:SetViewOffsetDucked(ply.OldDuckView * Vector(1, 1, 0.25))
 
     local shootDodgeVel = ply.ShootDodgeDir * shootDodgeSpeed + ply:GetUp() * shootDodgeUpwardSpeed
 
@@ -303,8 +311,10 @@ local function ShootDodge(ply)
 
     -- Update enemy accuracy
     for i, npc in ipairs(ply.Enemies) do
-        npc.OldAccuracy = npc:GetCurrentWeaponProficiency()
-        npc:SetCurrentWeaponProficiency(0)
+        if IsValid(npc) then
+            npc.OldAccuracy = npc:GetCurrentWeaponProficiency()
+            --npc:SetCurrentWeaponProficiency(0)
+        end
     end
 
     ply.OldTimeScale = game.GetTimeScale()
@@ -346,7 +356,6 @@ local function ShootDodgeTick(ply, moveData)
     local newAngle = Angle(ply:EyeAngles().pitch, ply:EyeAngles().yaw, Lerp(20 * FrameTime(), curRoll, dodgeRoll))
 
     ply:SetEyeAngles(newAngle)
-
     ply.ShootDodgeLiftedOff = ply.ShootDodgeLiftedOff or (ply:OnGround() and CurTime() > ply.TimeToCheckShootDodgeLiftedOff)
 
     if ply:OnGround() and ply.ShootDodgeLiftedOff then
@@ -379,14 +388,16 @@ end
 local function PlayerTick(ply, moveData)
     if ply.GrabbedLedge then
         LedgeTick(ply, moveData)
-        
+       
         if ply:KeyDown(IN_SPEED) and ply:KeyDown(IN_FORWARD) and CurTime() > ply.TimeToCheckVault then
             VaultLedge(ply)
         end
 
         return
     elseif ply.IsShootDodging then
-        if (ply.TimeToCheckShootDodge and CurTime() > ply.TimeToCheckShootDodge) or ply:GetMoveType() == MOVETYPE_LADDER or ply:WaterLevel() > 0 or ply:GetMoveType() == MOVETYPE_NOCLIP then
+        if (ply.TimeToCheckShootDodge and CurTime() > ply.TimeToCheckShootDodge)
+            or ply:GetMoveType() == MOVETYPE_LADDER or ply:GetMoveType() == MOVETYPE_NOCLIP 
+            or ply:WaterLevel() > 0 or not ply:Alive() then
             StopShootDodge(ply)
         else
             ShootDodgeTick(ply, moveData)
@@ -436,19 +447,43 @@ hook.Add("KeyPress", "agility_PlayerKeyPress", function(ply, key)
         return
     end
 
-    if not ply.IsShootDodging and not ply:OnGround() and key == IN_JUMP and (ply:KeyDown(IN_MOVELEFT) or ply:KeyDown(IN_MOVERIGHT)) then
-        local direction = ply:KeyDown(IN_MOVELEFT) and 1 or -1
-        local wallJumpTrace = WallJumpTrace(ply, direction)
+    if not ply.IsShootDodging then
+        if not ply:OnGround() and key == IN_JUMP then
+            if ply.IsSlidng then return end -- can't wallkick if sliding
 
-        if wallJumpTrace.Hit then
-            WallJump(ply, wallJumpTrace, direction)
+            local isStrafing = ply:KeyDown(IN_MOVELEFT) or ply:KeyDown(IN_MOVERIGHT)
+            local timeSinceLastWallJump = CurTime() - (ply.LastWallJump or 0)
+
+            if isStrafing and timeSinceLastWallJump > wallJumpDelay then
+                local direction = ply:KeyDown(IN_MOVELEFT) and 1 or -1
+                local wallJumpTrace = WallJumpTrace(ply, direction)
+
+                if wallJumpTrace.Hit then
+                    WallJump(ply, wallJumpTrace, direction)
+                end
+            end
+
+            return
         end
-    elseif not ply.IsSliding and ply:OnGround() and not ply:Crouching() and key == IN_DUCK and ply:KeyDown(IN_SPEED) and ply:KeyDown(IN_FORWARD) then 
-        StartSliding(ply)
-    elseif ply.IsSliding and key == IN_JUMP then
+
+        if key == IN_USE and ply:KeyDown(IN_SPEED) and ply:OnGround() then
+            ShootDodge(ply)
+        end
+    elseif key == IN_DUCK then
+        game.SetTimeScale(ply.OldTimeScale)
+    end
+
+    -- Check if ready to start sliding
+    if not ply.IsSliding then
+        if not ply:OnGround() or ply:Crouching() then return end
+
+        if key == IN_DUCK and ply:KeyDown(IN_SPEED) and ply:KeyDown(IN_FORWARD) then
+            StartSliding(ply)
+            return
+        end
+    elseif key == IN_JUMP then
         StopSliding(ply)
-    elseif not ply.IsShootDodging and key == IN_USE and ply:KeyDown(IN_SPEED) and ply:OnGround() then
-        ShootDodge(ply)
+        return
     end
 end)
 
@@ -478,4 +513,23 @@ hook.Add("OnNPCKilled", "agility_NPCKilled", function(npc)
             table.RemoveByValue(ply.Enemies, npc)
         end
     end
+end)
+
+concommand.Add("bullet_time", function(ply, cmd, args)
+    if game.GetTimeScale() ~= 1 then
+        game.SetTimeScale(1)
+
+        ply:SetWalkSpeed(ply.OldWalkSpeed)
+        ply:SetRunSpeed(ply.OldRunSpeed)
+    else
+        game.SetTimeScale(0.1) 
+
+        ply.OldWalkSpeed = ply:GetWalkSpeed()
+        ply.OldRunSpeed = ply:GetRunSpeed()
+
+        ply:SetWalkSpeed(ply.OldWalkSpeed * slomoSpeedMultiplier)
+        ply:SetRunSpeed(ply.OldRunSpeed * slomoSpeedMultiplier)
+    end
+
+    ply.OldTimeScale = game.GetTimeScale()
 end)
