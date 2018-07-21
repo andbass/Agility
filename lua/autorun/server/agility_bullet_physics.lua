@@ -55,17 +55,17 @@ hook.Add("EntityFireBullets", "agility_FireBullets", function(ent, data)
     up:Normalize()
 
     local weapon = nil
-    if IsValid(data.Attacker) then
+    if IsValid(data.Attacker) and data.Attacker.GetActiveWeapon then
         weapon = data.Attacker:GetActiveWeapon()
     end
 
-    local isShotgun = false
+    local fromShotgun = false
     local multipliers = ComputeMultipliers(data)
     
     local speed = 4e3
     if data.Num > 3 then
-        isShotgun = true
-        speed = speed * 0.8
+        fromShotgun = true
+        speed = speed * 0.75
     end
 
     for i = 1, data.Num do
@@ -89,7 +89,7 @@ hook.Add("EntityFireBullets", "agility_FireBullets", function(ent, data)
         bullet.LifeTime = 3.0
 
         bullet.Weapon = weapon
-        bullet.FromShotgun = isShotgun
+        bullet.FromShotgun = fromShotgun
         bullet.Multipliers = multipliers
 
         bullet:SetAttacker(ent)
