@@ -28,7 +28,7 @@ local shootDodgeSpeed = 425
 local shootDodgeUpwardSpeed = 285
 local shootDodgeStandUpDelay = 1
 
-local slomoSpeedMultiplier = 2.5
+local slomoSpeedMultiplier = 2
 
 local ledgeImpactSounds = {}
 for i = 1, 6 do
@@ -95,24 +95,26 @@ local function IsLedgeDetected(ply, ledgeTrace)
         maxs = Vector(16, 16, 73),
     }
 
+    if roofTrace.Hit then return false end
+
     local timeDiff = CurTime() - (ply.ReleaseLedgeTime or 0)
+    if timeDiff < releaseWaitTime then return false end
 
     local isSurfaceLedge = ply:GetUp():Dot(ledgeTrace.HitNormal) > 0.8
+    if not isSurfaceLedge then return false end
+
     local isLedgeHighEnough = ledgeTrace.HitPos.z - ply:GetPos().z > 50
+    if not isLedgeHighEnough then return false end
 
     ply.DirToLedge = (ledgeTrace.HitPos - ply:GetShootPos()):GetNormalized()
 
     local isPlayerLookingAtLedge = ply:GetAimVector():Dot(ply.DirToLedge) > 0.1
-    local isLedgeStable = ledgeTrace.Entity:GetVelocity():LengthSqr() < 100.0 * 100.0
+    if not isPlayerLookingAtLedge then return false end
 
-    return timeDiff > releaseWaitTime 
-        and not roofTrace.Hit 
-        and ledgeTrace.Hit 
-        and not ply:Crouching() 
-        and isSurfaceLedge 
-        and isLedgeHighEnough 
-        and isPlayerLookingAtLedge
-        and isLedgeStable
+    local isLedgeStable = ledgeTrace.Entity:GetVelocity():LengthSqr() < 100.0 * 100.0
+    if not isLedgeStable then return false end
+
+    return true
 end
 
 local function DeattachFromLedge(ply)

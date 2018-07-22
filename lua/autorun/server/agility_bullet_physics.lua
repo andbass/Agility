@@ -8,7 +8,7 @@ local ammoMultipliers = {
         Force = 1.0,
     },
     Buckshot = {
-        Damage = 0.6,
+        Damage = 0.65,
         Force = 1.5,
     },
     AR2 = {
@@ -62,7 +62,7 @@ hook.Add("EntityFireBullets", "agility_FireBullets", function(ent, data)
     local fromShotgun = false
     local multipliers = ComputeMultipliers(data)
     
-    local speed = 4e3
+    local speed = 3e3
     if data.Num > 3 then
         fromShotgun = true
         speed = speed * 0.75
