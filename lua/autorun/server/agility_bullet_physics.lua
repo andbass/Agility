@@ -4,11 +4,11 @@ local cvar = include "agility/cvars.lua"
 
 local ammoMultipliers = {
     Pistol = {
-        Damage = 0.9,
+        Damage = 1.0,
         Force = 1.0,
     },
     Buckshot = {
-        Damage = 0.65,
+        Damage = 1.0,
         Force = 1.5,
     },
     AR2 = {
@@ -20,7 +20,7 @@ local ammoMultipliers = {
         Force = 0.8,
     },
     ["357"] = {
-        Damage = 2.0,
+        Damage = 4.0,
         Force = 2.5,
     }
 }
@@ -39,14 +39,22 @@ local function ComputeMultipliers(data)
 
     return {
         Damage = math.log(data.Damage) * 0.5,
-        Force = math.log(data.Force) * 0.5,
+        Force = math.log(data.Force) + math.log(data.Damage, 10),
     }
 end
 
+-- Very simple, with a natural and purposeful bias towards center of circle
+local function ApplySpread(data, right, up)
+    local radius = math.Rand(0, 1)
+    local ang = math.Rand(0, 2 * math.pi)
+    
+    local x, y = math.cos(ang) * radius, math.sin(ang) * radius
+
+    return data.Dir + right * x * data.Spread.x + up * y * data.Spread.y
+end
+
 hook.Add("EntityFireBullets", "agility_FireBullets", function(ent, data)
-    if not cvar.BulletEnable:GetBool() then
-        return true
-    end
+    if not cvar.BulletEnable:GetBool() then return true end
 
     local right = data.Dir:Cross(ent:GetUp())
     local up = data.Dir:Cross(right)
@@ -65,19 +73,10 @@ hook.Add("EntityFireBullets", "agility_FireBullets", function(ent, data)
     local speed = 3e3
     if data.Num > 3 then
         fromShotgun = true
-        speed = speed * 0.75
     end
 
     for i = 1, data.Num do
-        local ang = math.Rand(0, 2 * math.pi)
-        local xDisp = math.cos(ang) * math.Rand(0, data.Spread.x)
-        local yDisp = math.sin(ang) * math.Rand(0, data.Spread.y)
-
-        local dir = data.Dir
-        dir = dir + right * xDisp
-        dir = dir + up * yDisp
-
-        dir:Normalize()
+        local dir = ApplySpread(data, right, up)
 
         local bullet = ents.Create("bullet")
         if not IsValid(bullet) then
