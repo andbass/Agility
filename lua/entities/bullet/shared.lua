@@ -11,5 +11,7 @@ ENT.RenderGroup = RENDERGROUP_BOTH
 function ENT:SetupDataTables()
     self:NetworkVar("Vector", 0, "KillVelocity")
     self:NetworkVar("Int", 0, "KillBone")
+
     self:NetworkVar("Entity", 0, "KillEntity")
+    self:NetworkVar("Entity", 1, "Shooter")
 end
