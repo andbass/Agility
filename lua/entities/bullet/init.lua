@@ -120,7 +120,6 @@ function ENT:Damage(target, vel)
         end
     end
 
-    -- TODO figure out why it crashes when item_item_crates take damage?
     target:TakeDamageInfo(dmg)
 
     self:CreateImpactEffects(impactData)
