@@ -29,7 +29,9 @@ end
 
 function ENT:SetAttacker(attacker)
     self.Attacker = attacker
+    
     self:SetOwner(attacker)
+    self:SetShooter(attacker) -- used for networking purposes
 
     self.OldPos = self.Attacker:EyePos()
 end
@@ -63,7 +65,7 @@ function ENT:ImpactData(dir)
     local curPos = self:GetPos()
 
     local start = oldPos
-    local endpos = curPos + dir * 100
+    local endpos = curPos + dir * 10
 
     if cvar.BulletDebugDraw:GetBool() then
         debugoverlay.Line(start, endpos, self.LifeTime, Color(0, 255, 0))
@@ -96,7 +98,7 @@ function ENT:Damage(target, vel)
     -- TODO have this set by hook
     --
     dmg:SetDamageType(DMG_BULLET)
-    dmg:SetDamage(speed * 1e-2 * self.Multipliers.Damage)
+    dmg:SetDamage(speed * 0.5e-2 * self.Multipliers.Damage)
     dmg:SetDamageForce(self.Direction * speed * self.Multipliers.Force)
 
     dmg:SetDamagePosition(impactData.HitPos)
@@ -119,9 +121,7 @@ function ENT:Damage(target, vel)
     end
 
     -- TODO figure out why it crashes when item_item_crates take damage?
-    if target:GetClass() ~= "item_item_crate" then
-        target:TakeDamageInfo(dmg)
-    end
+    target:TakeDamageInfo(dmg)
 
     self:CreateImpactEffects(impactData)
 
@@ -139,11 +139,10 @@ end
 function ENT:FightGravity(phys)
     if not phys:IsValid() or self.FromShotgun then return end
 
-    local multiplier = (self.Multipliers.Force - 1.35) * 0.15
     local gravity = physenv.GetGravity()
-
     local speed = self:GetVelocity():Length()
-    multiplier = multiplier * speed * 1e-2
+
+    local multiplier = self.Multipliers.Force * speed * 1e-4
 
     phys:ApplyForceCenter(-gravity * 1.505e-2 * math.Clamp(multiplier, 0, 1))
 end
@@ -155,20 +154,19 @@ function ENT:PhysicsUpdate(phys)
 
     if self.CurImpactData.Hit then
         local hitEnt = self.CurImpactData.Entity
-        if hitEnt:IsNPC() or hitEnt:IsPlayer() then
-            local impactDir = self.CurImpactData.HitPos - self:GetPos()
-            impactDir:Normalize()
 
-            -- This is used to handle firing upon entities that are very close to the
-            -- spawn location of the bullet.
-            -- If too close, and spawn within the entity, the physics system will miss the collision
-            if impactDir:Dot(self.CurImpactData.Normal) < 0 then
-                self:Damage(self.CurImpactData.Entity, self:GetVelocity())
-            end
+        local impactDir = self.CurImpactData.HitPos - self:GetPos()
+        impactDir:Normalize()
+
+        -- This is used to handle firing upon entities that are very close to the
+        -- spawn location of the bullet.
+        -- If too close, and spawn within the entity, the physics system will miss the collision
+        if impactDir:Dot(self.CurImpactData.Normal) < 0 then
+            self:Damage(self.CurImpactData.Entity, self:GetVelocity())
         end
 
         self:SetCollisionGroup(COLLISION_GROUP_PROJECTILE)
-    else 
+    else
         self:SetCollisionGroup(COLLISION_GROUP_WORLD)
     end
 
