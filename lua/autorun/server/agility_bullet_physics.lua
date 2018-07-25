@@ -102,7 +102,7 @@ hook.Add("EntityFireBullets", "agility_FireBullets", function(ent, data)
 end)
 
 hook.Add("ScaleNPCDamage", "agility_ScaleNPCDamage", function(npc, hitgroup, dmginfo)
-    if cvar.BulletEnableDamageScale:GetBool() then
+    if cvar.BulletEnable:GetBool() and cvar.BulletEnableDamageScale:GetBool() then
         if hitgroup == HITGROUP_HEAD then
             dmginfo:ScaleDamage(2.0)
         end
