@@ -497,6 +497,12 @@ hook.Add("KeyPress", "agility_PlayerKeyPress", function(ply, key)
     end
 end)
 
+hook.Add("PlayerUse", "agility_UseShootdodgeCheck", function(ply, ent)
+    if ply.IsShootDodging then
+        return false
+    end
+end)
+
 hook.Add("OnEntityCreated", "agility_EntityCreation", function(ent)
     if ent:IsNPC() then
         for i, ply in ipairs(player.GetAll()) do
