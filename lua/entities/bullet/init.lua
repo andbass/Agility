@@ -25,6 +25,17 @@ function ENT:Initialize()
 
         self.Phys:Wake()
     end
+
+    local tracerColor = Color(255, 190, 100)
+    if self.Attacker:IsPlayer() then
+        tracerColor = Color(190, 255, 100)
+    end
+
+    self.TracerTrail = util.SpriteTrail(self, 0, tracerColor, true, 2, 0, 0.2, 0.05, "sprites/laserbeam.vmt")
+end
+
+function ENT:OnRemove()
+    self.TracerTrail:SetParent()
 end
 
 function ENT:SetAttacker(attacker)
@@ -196,4 +207,16 @@ function ENT:PhysicsCollide(colData, collider)
     end
 
     self:Impact()
+end
+
+function ENT:GravGunPunt(ply)
+    self:SetAttacker(ply)
+    self.SpeedToDamage = self.SpeedToDamage * 0.05
+
+    self.Multipliers = {
+        Damage = 100,
+        Force = 5,
+    }
+
+    return true
 end
