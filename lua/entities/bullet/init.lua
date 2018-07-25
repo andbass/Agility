@@ -9,6 +9,8 @@ include "impactEffects.lua"
 
 local cvar = include "agility/cvars.lua"
 
+local tracerLifetime = 0.2
+
 function ENT:Initialize()
     self.StartTime = CurTime()
 
@@ -31,11 +33,7 @@ function ENT:Initialize()
         tracerColor = Color(190, 255, 100)
     end
 
-    self.TracerTrail = util.SpriteTrail(self, 0, tracerColor, true, 2, 0, 0.2, 0.05, "sprites/laserbeam.vmt")
-end
-
-function ENT:OnRemove()
-    self.TracerTrail:SetParent()
+    self.TracerTrail = util.SpriteTrail(self, 0, tracerColor, true, 2, 0, tracerLifetime, 0.05, "sprites/laserbeam.vmt")
 end
 
 function ENT:SetAttacker(attacker)
@@ -64,6 +62,14 @@ end
 
 function ENT:Impact()
     self.Impacted = true
+
+    local tracerTrail = self.TracerTrail -- Store our trail as our entity will be nuked in the next frame, and the reference will go along with it
+    tracerTrail:SetParent()
+
+    -- Clean up our trail after it fades out
+    timer.Simple(tracerLifetime + 0.1, function()
+        tracerTrail:Remove()
+    end)
 
     self:SetRenderMode(RENDERMODE_NONE)
     self:PhysicsDestroy()
