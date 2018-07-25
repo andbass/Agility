@@ -13,5 +13,4 @@ function ENT:SetupDataTables()
     self:NetworkVar("Int", 0, "KillBone")
 
     self:NetworkVar("Entity", 0, "KillEntity")
-    self:NetworkVar("Entity", 1, "Shooter")
 end

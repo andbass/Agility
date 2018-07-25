@@ -38,9 +38,7 @@ end
 
 function ENT:SetAttacker(attacker)
     self.Attacker = attacker
-    
     self:SetOwner(attacker)
-    self:SetShooter(attacker) -- used for networking purposes
 
     self.OldPos = self.Attacker:EyePos()
 end
