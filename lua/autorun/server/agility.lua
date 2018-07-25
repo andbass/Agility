@@ -280,8 +280,16 @@ local function ShootDodge(ply)
     ply.IsShootDodging = true
     ply.TimeToCheckShootDodgeLiftedOff = CurTime() + 0.3
 
-    local desiredForwardDir = ply:KeyDown(IN_FORWARD) and ply:GetForward() or ply:KeyDown(IN_BACK) and -ply:GetForward() or Vector(0, 0, 0)
-    local desiredRightDir = ply:KeyDown(IN_MOVERIGHT) and ply:GetRight() or ply:KeyDown(IN_MOVELEFT) and -ply:GetRight() or Vector(0, 0, 0)
+    local aimDir = ply:GetAimVector()
+
+    aimDir.z = 0
+    aimDir:Normalize()
+
+    local rightDir = aimDir:Cross(ply:GetUp())
+    rightDir:Normalize()
+
+    local desiredForwardDir = ply:KeyDown(IN_FORWARD) and aimDir or ply:KeyDown(IN_BACK) and -aimDir or Vector(0, 0, 0)
+    local desiredRightDir = ply:KeyDown(IN_MOVERIGHT) and rightDir or ply:KeyDown(IN_MOVELEFT) and -rightDir or Vector(0, 0, 0)
 
     ply.ShootDodgeDir = (desiredForwardDir + desiredRightDir):GetNormalized()
     ply.RightShootDodgeDir = ply.ShootDodgeDir:Cross(ply:GetUp())
