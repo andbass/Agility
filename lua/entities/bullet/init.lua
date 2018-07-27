@@ -34,6 +34,11 @@ function ENT:Initialize()
     end
 
     self.TracerTrail = util.SpriteTrail(self, 0, tracerColor, true, 2, 0, tracerLifetime, 0.05, "sprites/laserbeam.vmt")
+
+    self:DrawShadow(false)
+    self.TracerTrail:DrawShadow(false)
+
+    self.PlayersHeardWhoosh = {}
 end
 
 function ENT:SetAttacker(attacker)
@@ -61,7 +66,8 @@ end
 function ENT:Impact()
     self.Impacted = true
 
-    local tracerTrail = self.TracerTrail -- Store our trail as our entity will be nuked in the next frame, and the reference will go along with it
+    -- Store our trail as our entity will be nuked in the next frame, and the reference will go along with it
+    local tracerTrail = self.TracerTrail
     tracerTrail:SetParent()
 
     -- Clean up our trail after it fades out
@@ -94,9 +100,11 @@ function ENT:ImpactData(dir)
     }
 end
 
+
 function ENT:Think()
     if not IsValid(self.Attacker) or self.Impacted or self:Expired() then
         self:Remove()
+        return
     end
 end
 
