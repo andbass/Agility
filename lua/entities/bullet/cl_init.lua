@@ -9,7 +9,6 @@ local renderBounds = Vector(tracerLen, tracerLen, tracerLen)
 
 function ENT:Initialize()
     self:SetRenderBounds(-renderBounds, renderBounds)
-    self:DrawShadow(false)
 end
 
 function ENT:OnRemove()
