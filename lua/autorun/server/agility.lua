@@ -23,11 +23,11 @@ local wallJumpDelay = 0.35
 local slidingSlowdown = 100
 local slidingSlopeBoost = 500
 
-local shootDodgeTimescale = 0.15
-local shootDodgeSpeed = 425
-local shootDodgeUpwardSpeed = 285
+local shootDodgeSpeed = 625
+local shootDodgeUpwardSpeed = 200
 local shootDodgeStandUpDelay = 1
 
+local slomoTimescale = 0.1
 local slomoSpeedMultiplier = 2
 
 local ledgeImpactSounds = {}
@@ -328,7 +328,7 @@ local function ShootDodge(ply)
     end
 
     ply.OldTimeScale = game.GetTimeScale()
-    game.SetTimeScale(shootDodgeTimescale)
+    game.SetTimeScale(slomoTimescale)
 end
 
 local function ShootDodgeHitGround(ply)
@@ -538,7 +538,7 @@ concommand.Add("bullet_time", function(ply, cmd, args)
         ply:SetWalkSpeed(ply.OldWalkSpeed)
         ply:SetRunSpeed(ply.OldRunSpeed)
     else
-        game.SetTimeScale(0.1) 
+        game.SetTimeScale(slomoTimescale)
 
         ply.OldWalkSpeed = ply:GetWalkSpeed()
         ply.OldRunSpeed = ply:GetRunSpeed()
