@@ -1,0 +1,15 @@
+{
+    "Lua.diagnostics.disable": [
+        "undefined-global"
+    ],
+    "cSpell.enabled": false,
+    "spellright.language": [
+        "en"
+    ],
+    "spellright.documentTypes": [
+        "markdown",
+        "latex",
+        "plaintext",
+        "lua"
+    ]
+}

@@ -1,7 +1,13 @@
 
+include "agility/util.lua"
+local cvar = include "agility/cvars.lua"
+
 -- Network messages
 util.AddNetworkString "LedgeGrabbed"
 util.AddNetworkString "LedgeReleased"
+
+util.AddNetworkString "BulletTimeStarted"
+util.AddNetworkString "BulletTimeStopped"
 
 -- Client files
 AddCSLuaFile "agility/spring.lua"
@@ -13,22 +19,36 @@ local ledgeReachOutwards = 15
 local ledgeHandGap = 20
 
 local releaseWaitTime = 0.2
-
 local jumpOffPower = 250
-local slideMultiplier = 1.4
 
+local enableWallJump = false
 local wallJumpPower = 250
 local wallJumpDelay = 0.35
 
-local slidingSlowdown = 100
-local slidingSlopeBoost = 500
+local slideMultiplier = 2.0
+local slidingSlowdown = 400
+local slidingSlopeBoost = 1000
 
-local shootDodgeSpeed = 625
-local shootDodgeUpwardSpeed = 200
-local shootDodgeStandUpDelay = 1
+local shootDodgeSpeed = 580
+local shootDodgeUpwardSpeed = 160
+local shootDodgeStandUpDelay = 1.5
+local shootDodgeSlomoCost = 0.1
 
-local slomoTimescale = 0.1
-local slomoSpeedMultiplier = 2
+local slomoTimescale = 0.2
+local slomoShootDodgeTimescale = 0.1
+local slomoTransitionSpeed = 10.0
+local slomoSpeedMultiplier = 1.0
+
+local slomoDrainRate = 0.075
+local slomoKillRecovery = 0.25
+local slomoOverchargeAmt = 0.15
+
+local playerDmgTypesToScale = {
+    [DMG_BULLET] = true,
+    [DMG_SLASH] = true,
+    [DMG_CLUB] = true,
+    [DMG_SONIC] = true,
+}
 
 local ledgeImpactSounds = {}
 for i = 1, 6 do
@@ -38,6 +58,10 @@ end
 local ledgeVaultSounds = {}
 for i = 1, 7 do
     table.insert(ledgeVaultSounds, Sound(Format("physics/body/body_medium_impact_soft%d.wav", i)))
+end
+
+local function InWater(ply)
+    return bit.band(ply:GetFlags(), FL_INWATER) > 0
 end
 
 local function LedgeTrace(ply)
@@ -67,8 +91,8 @@ local function LedgeTrace(ply)
         mask = MASK_SOLID,
     }
 
-    if not leftHandTrace.Hit or not rightHandTrace.Hit then 
-        return { 
+    if not leftHandTrace.Hit or not rightHandTrace.Hit then
+        return {
             Hit = false
         }
     end
@@ -163,7 +187,7 @@ end
 local function VaultLedge(ply)
     DeattachFromLedge(ply)
 
-    local vaultPower = 100 + math.max(ply.LedgeTrace.HitPos.z - ply.GrabbedPos.z, 0) * 2.5
+    local vaultPower = 125 + math.max(ply.LedgeTrace.HitPos.z - ply.GrabbedPos.z, 0) * 2.6
     local vaultDir = ply.VaultDir or 1
 
     ply:SetVelocity(-ply:GetVelocity() + ply:GetUp() * vaultPower * 65)
@@ -227,7 +251,7 @@ local function StartSliding(ply)
     ply.RightSlideDir = ply.SlideDir:Cross(ply:GetUp())
 
     ply.SlideSpeed = ply:GetVelocity():Length() * slideMultiplier
-    ply:ViewPunch(Angle(-10, 0, 0))
+    ply:ViewPunch(Angle(-2, 0, 5))
 end
 
 local function StopSliding(ply)
@@ -276,8 +300,124 @@ local function SlidingTick(ply, moveData)
     ply.SlideVel = vel
 end
 
+local function StartBulletTime(ply)
+    if not game.SinglePlayer() or not ply:Alive() then
+        return false
+    end
+
+    if ply.BulletTimeAmt <= 0.0 and not ply.IsShootDodging then
+        return false
+    end 
+
+    ply.BulletTimeActive = true
+    ply.TimeToAllowBTEnd = RealTime() + 0.5
+
+    ply.OldWalkSpeed = ply:GetWalkSpeed()
+    ply.OldRunSpeed = ply:GetRunSpeed()
+
+    ply:SetWalkSpeed(ply.OldWalkSpeed * slomoSpeedMultiplier)
+    ply:SetRunSpeed(ply.OldRunSpeed * slomoSpeedMultiplier)
+    ply:AddEFlags(EFL_NO_DAMAGE_FORCES)
+
+    net.Start("BulletTimeStarted")
+    net.Send(ply)
+    return true
+end
+
+local function StopBulletTime(ply)
+    if not game.SinglePlayer() or not ply.BulletTimeActive then
+        return false
+    end
+
+    ply.BulletTimeActive = false
+    
+    -- Discard any overcharge from NPC kills
+    ply.OverchargeBulletTimeAmt = 0.0
+
+    -- Be nice and round up
+    -- TODO this is kind of janky
+    if ply.BulletTimeAmt >= 0.97 then
+        ply.BulletTimeAmt = 1.0
+    end
+
+    ply:SetWalkSpeed(ply.OldWalkSpeed)
+    ply:SetRunSpeed(ply.OldRunSpeed)
+    
+    if not ply.IsShootDodging then
+        ply:RemoveEFlags(EFL_NO_DAMAGE_FORCES)
+    end
+
+    net.Start("BulletTimeStopped")
+    net.Send(ply)
+    return true
+end
+
+local function DrainBulletTime(ply, typeToDrain, dt)
+    ply[typeToDrain] = ply[typeToDrain] - slomoDrainRate * dt
+    ply[typeToDrain] = math.max(ply[typeToDrain], 0.0)
+end
+
+local function BulletTimeTick(ply)
+    if not game.SinglePlayer() then return end
+
+    local timeScale = game.GetTimeScale()
+    local timeScaleTarget = nil
+    local timeScaleSpeedMult = 1.0
+    local realFrameTime = FrameTime() / timeScale
+
+    local adjustedSlomoTimescale = ply.IsShootDodging and slomoShootDodgeTimescale or slomoTimescale
+    if ply.BulletTimeActive and timeScale > adjustedSlomoTimescale then
+        if ply.IsShootDodging then
+            timeScaleTarget = adjustedSlomoTimescale
+
+            -- To be consistent with normal bullet time, we gain overcharge for kills in shootdodge
+            -- so drain the overcharge if we have any
+            -- I'm not so sure about this (its just done for the visual for getting kills in slomo)
+            if ply.OverchargeBulletTimeAmt > 0.0 then
+                DrainBulletTime(ply, "OverchargeBulletTimeAmt", realFrameTime)
+            end
+        elseif ply.BulletTimeAmt > 0.0 or ply.OverchargeBulletTimeAmt > 0.0 then
+            timeScaleTarget = adjustedSlomoTimescale
+
+            local typeToDrain = (ply.OverchargeBulletTimeAmt > 0.0) and "OverchargeBulletTimeAmt" or "BulletTimeAmt"
+            DrainBulletTime(ply, typeToDrain, realFrameTime)
+        else
+            StopBulletTime(ply)
+        end
+    elseif timeScale < 1.0 then
+        timeScaleTarget = 1.0
+        timeScaleSpeedMult = 0.5
+    end
+
+    -- For inf BT, undo any draining
+    if cvar.InfiniteBulletTime:GetBool() then
+        ply.BulletTimeAmt = 1.0
+    end
+
+    ply:SetNWFloat("BulletTimeAmt", ply.BulletTimeAmt)
+    ply:SetNWFloat("OverchargeBulletTimeAmt", ply.OverchargeBulletTimeAmt)
+
+    if timeScaleTarget ~= nil then
+        -- Use time scale adjusted FrameTime() on purpose here - provides a nice smoothing effect
+        local nextTimeScale = math.Approach(timeScale, timeScaleTarget, slomoTransitionSpeed * timeScaleSpeedMult * FrameTime())
+        game.SetTimeScale(nextTimeScale)
+    end
+end
+
+
 local function ShootDodge(ply)
+    if ply.BulletTimeAmt <= 0.0 then
+        return false
+    end
+
+    -- Discard any overcharge as soon as a shoot dodge is performed
+    ply.OverchargeBulletTimeAmt = 0.0
+
+    ply.BulletTimeAmt = ply.BulletTimeAmt - shootDodgeSlomoCost
+    ply.BulletTimeAmt = math.max(ply.BulletTimeAmt, 0.0)
+
     ply.IsShootDodging = true
+    ply.ShootDodgeHitGround = false
     ply.TimeToCheckShootDodgeLiftedOff = CurTime() + 0.3
 
     local aimDir = ply:GetAimVector()
@@ -301,8 +441,8 @@ local function ShootDodge(ply)
     ply:SetPos(plyPos)
 
     local bottom, top = ply:GetHullDuck()
-    top.z = top.z * 0.1
-    bottom.z = 1
+    top.z = top.z * 0.025
+    bottom.z = 0
 
     ply:SetHull(bottom, top)
     ply:SetHullDuck(bottom, top)
@@ -310,68 +450,39 @@ local function ShootDodge(ply)
     ply.OldDuckView = ply:GetViewOffsetDucked()
     ply.OldDuckSpeed = ply:GetCrouchedWalkSpeed()
 
-    ply:SetViewOffsetDucked(ply.OldDuckView * Vector(1, 1, 0.25))
+    ply:SetViewOffsetDucked(ply.OldDuckView * Vector(1, 1, 0.5))
 
     local shootDodgeVel = ply.ShootDodgeDir * shootDodgeSpeed + ply:GetUp() * shootDodgeUpwardSpeed
-
     ply:SetVelocity(shootDodgeVel - ply:GetVelocity())
 
-    ply:ViewPunch(Angle(ply.ShootDodgeDir:Dot(ply:GetForward()) * 5, 0, ply.ShootDodgeDir:Dot(ply:GetRight()) * 15))
+    --ply:ViewPunch(Angle(ply.ShootDodgeDir:Dot(ply:GetForward()) * 5, 0, ply.ShootDodgeDir:Dot(ply:GetRight()) * 15))
+    ply:ViewPunch(Angle(0, 0, ply.ShootDodgeDir:Dot(ply:GetRight()) * 15))
     ply:SetCrouchedWalkSpeed(0)
 
-    -- Update enemy accuracy
-    for i, npc in ipairs(ply.Enemies) do
-        if IsValid(npc) then
-            npc.OldAccuracy = npc:GetCurrentWeaponProficiency()
-            --npc:SetCurrentWeaponProficiency(0)
-        end
+    if not ply.BulletTimeActive then
+        StartBulletTime(ply)
     end
 
-    ply.OldTimeScale = game.GetTimeScale()
-    game.SetTimeScale(slomoTimescale)
+    return true
 end
 
 local function ShootDodgeHitGround(ply)
+    ply.ShootDodgeHitGround = true
+
     -- In the event shoot dodging ends before player hits ground, reset everything again
-    game.SetTimeScale(ply.OldTimeScale)
+    StopBulletTime(ply)
 
-    for i, npc in ipairs(ply.Enemies) do
-        if npc.OldAccuracy then
-            npc:SetCurrentWeaponProficiency(npc.OldAccuracy)
-        end
-    end
-end
-
-local function ShootDodgeTick(ply, moveData)
-    moveData:AddKey(IN_DUCK)
-    moveData:SetSideSpeed(0)
-
-    if not ply:OnGround() then
-        moveData:SetForwardSpeed(math.abs(moveData:GetForwardSpeed()) * ply.ShootDodgeForwardness)
-    else 
-        moveData:SetForwardSpeed(0)
+    if InWater(ply) then
+        ply.ForceDuckCheckTime = CurTime() + 0.5     
+    else
+        local vel = ply:GetVelocity()
+        ply:SetVelocity(vel * 0.75 - vel) -- Have to subtract `vel` since `SetVelocity` actually adds the new velocity to the old velocity
     end
 
-    -- TODO move view tilting code into seperate function
-    local aimDir = ply:GetAimVector()
-    aimDir.z = 0
-    aimDir:Normalize()
+    local pitchAmt = ply:GetForward():Dot(ply.ShootDodgeDir)
+    local rollAmt = ply:GetRight():Dot(ply.ShootDodgeDir)
 
-    local forwardness = math.abs(aimDir:Dot(ply.ShootDodgeDir))
-    local rollDir = ply:GetForward():Dot(ply.RightShootDodgeDir) > 0 and -1 or 1
-
-    local dodgeRoll = math.deg(math.acos(forwardness)) * 0.35 * rollDir
-
-    local curRoll = ply:EyeAngles().roll
-    local newAngle = Angle(ply:EyeAngles().pitch, ply:EyeAngles().yaw, Lerp(20 * FrameTime(), curRoll, dodgeRoll))
-
-    ply:SetEyeAngles(newAngle)
-    ply.ShootDodgeLiftedOff = ply.ShootDodgeLiftedOff or (ply:OnGround() and CurTime() > ply.TimeToCheckShootDodgeLiftedOff)
-
-    if ply:OnGround() and ply.ShootDodgeLiftedOff then
-        ShootDodgeHitGround(ply)
-        ply.TimeToCheckShootDodge = ply.TimeToCheckShootDodge or CurTime() + shootDodgeStandUpDelay
-    end
+    ply:ViewPunch(Angle(2.5 * pitchAmt, 0, 7.5 * rollAmt))
 end
 
 local function StopShootDodge(ply)
@@ -388,14 +499,65 @@ local function StopShootDodge(ply)
     ply:SetCrouchedWalkSpeed(ply.OldDuckSpeed)
 
     timer.Simple(0.26, function()
-        ply:SetPos(ply:GetPos() + Vector(0, 0, 5))
+        if not InWater(ply) then
+            ply:SetPos(ply:GetPos() + Vector(0, 0, 5))
+        end
+
         ply:SetViewOffsetDucked(ply.OldDuckView)
 
+        ply:RemoveEFlags(EFL_NO_DAMAGE_FORCES)
         ply:ResetHull()
     end)
 end
 
+local function ShootDodgeTick(ply, moveData)
+    moveData:AddKey(IN_DUCK)
+    moveData:SetSideSpeed(0)
+
+    if not ply:OnGround() then
+        -- TODO why was I doing this?
+        --moveData:SetForwardSpeed(math.abs(moveData:GetForwardSpeed()) * ply.ShootDodgeForwardness)
+        moveData:SetForwardSpeed(0)
+    else
+        moveData:SetForwardSpeed(0)
+    end
+
+    -- TODO move view tilting code into separate function
+    local aimDir = ply:GetAimVector()
+    aimDir.z = 0
+    aimDir:Normalize()
+
+    local forwardness = math.abs(aimDir:Dot(ply.ShootDodgeDir))
+    local rollDir = ply:GetForward():Dot(ply.RightShootDodgeDir) > 0 and -1 or 1
+
+    local dodgeRoll = math.deg(math.acos(forwardness)) * 0.35 * rollDir
+
+    local curRoll = ply:EyeAngles().roll
+    local newAngle = Angle(ply:EyeAngles().pitch, ply:EyeAngles().yaw, Lerp(20 * FrameTime(), curRoll, dodgeRoll))
+
+    ply:SetEyeAngles(newAngle)
+    ply.ShootDodgeLiftedOff = ply.ShootDodgeLiftedOff or (ply:OnGround() and CurTime() > ply.TimeToCheckShootDodgeLiftedOff)
+
+    if ply:OnGround() and ply.ShootDodgeLiftedOff and not ply.ShootDodgeHitGround then
+        ShootDodgeHitGround(ply)
+        ply.TimeToCheckShootDodge = CurTime() + shootDodgeStandUpDelay
+    end
+end
+
 local function PlayerTick(ply, moveData)
+    ply:SetWalkSpeed(150)  
+    ply:SetRunSpeed(250)
+
+    BulletTimeTick(ply)
+
+    if ply.ForceDuckCheckTime then
+        if CurTime() > ply.ForceDuckCheckTime then
+            ply.ForceDuckCheckTime = nil
+        else
+            moveData:AddKey(IN_DUCK)
+        end
+    end
+
     if ply.GrabbedLedge then
         LedgeTick(ply, moveData)
        
@@ -405,9 +567,9 @@ local function PlayerTick(ply, moveData)
 
         return
     elseif ply.IsShootDodging then
-        if (ply.TimeToCheckShootDodge and CurTime() > ply.TimeToCheckShootDodge)
+        if (ply.TimeToCheckShootDodge and CurTime() > ply.TimeToCheckShootDodge and not moveData:KeyDown(IN_DUCK))
             or ply:GetMoveType() == MOVETYPE_LADDER or ply:GetMoveType() == MOVETYPE_NOCLIP 
-            or ply:WaterLevel() > 0 or not ply:Alive() then
+            or ply:WaterLevel() >= 3.0 or not ply:Alive() then
             StopShootDodge(ply)
         else
             ShootDodgeTick(ply, moveData)
@@ -431,19 +593,20 @@ local function PlayerTick(ply, moveData)
     end
 end
 
-local function UpdateEnemiesForPlayer(ply)
-    for i, ent in ipairs(ents.FindByClass("npc_*")) do
-        if ent:IsNPC() and ent:Disposition(ply) == D_HT then
-            table.insert(ply.Enemies, ent)
-        end
-    end
-end
-
 hook.Add("PlayerTick", "agility_PlayerTick", PlayerTick)
 
-hook.Add("PlayerSpawn", "agility_PlayerSpawn", function(ply)
-    ply.Enemies = {}
-    UpdateEnemiesForPlayer(ply)
+hook.Add("PlayerSpawn", "agility_PlayerSpawn", function(ply, transition)
+    -- These might be set already if we're loading an engine save game
+    -- See the `saverestore` module
+    ply.BulletTimeAmt = transition and ply.BulletTimeAmt or 1.0
+    ply.OverchargeBulletTimeAmt = transition and ply.OverchargeBulletTimeAmt or 0.0
+
+    -- Fix eyes in stomach issue when crouching
+    ply:SetViewOffsetDucked(Vector(0, 0, 40))
+end)
+
+hook.Add("PlayerDeath", "agility_PlayerDeath", function(ply, inflictor, attacker)
+    StopBulletTime(ply)
 end)
 
 hook.Add("KeyPress", "agility_PlayerKeyPress", function(ply, key)
@@ -464,7 +627,7 @@ hook.Add("KeyPress", "agility_PlayerKeyPress", function(ply, key)
             local isStrafing = ply:KeyDown(IN_MOVELEFT) or ply:KeyDown(IN_MOVERIGHT)
             local timeSinceLastWallJump = CurTime() - (ply.LastWallJump or 0)
 
-            if isStrafing and timeSinceLastWallJump > wallJumpDelay then
+            if enableWallJump and isStrafing and timeSinceLastWallJump > wallJumpDelay then
                 local direction = ply:KeyDown(IN_MOVELEFT) and 1 or -1
                 local wallJumpTrace = WallJumpTrace(ply, direction)
 
@@ -479,8 +642,6 @@ hook.Add("KeyPress", "agility_PlayerKeyPress", function(ply, key)
         if key == IN_USE and ply:KeyDown(IN_SPEED) and ply:OnGround() then
             ShootDodge(ply)
         end
-    elseif key == IN_DUCK then
-        game.SetTimeScale(ply.OldTimeScale)
     end
 
     -- Check if ready to start sliding
@@ -503,49 +664,88 @@ hook.Add("PlayerUse", "agility_UseShootdodgeCheck", function(ply, ent)
     end
 end)
 
-hook.Add("OnEntityCreated", "agility_EntityCreation", function(ent)
-    if ent:IsNPC() then
-        for i, ply in ipairs(player.GetAll()) do
-            if ent:Disposition(ply) == D_HT then
-                table.insert(ply.Enemies, ent)
-            end
-        end
-    end
-end)
+local function CanPlayerPickup(ply, ent)
+    return IsValid(ent) and not ent.Dissolving
+end
 
-hook.Add("EntityRemoved", "agility_EntityRemoved", function(ent)
-    if ent:IsNPC() then
-        for i, ply in ipairs(player.GetAll()) do
-            if ent:Disposition(ply) == D_HT then
-                table.RemoveByValue(ply.Enemies, ent)
-            end
-        end
-    end
-end)
+hook.Add("PlayerCanPickupWeapon", "agility_CanPickupWeapon", CanPlayerPickup)
+hook.Add("PlayerCanPickupItem", "agility_CanPickupItem", CanPlayerPickup)
 
-hook.Add("OnNPCKilled", "agility_NPCKilled", function(npc)
+hook.Add("OnNPCKilled", "agility_NPCKilled", function(npc, inflictor)
     for i, ply in ipairs(player.GetAll()) do
         if npc:Disposition(ply) == D_HT then
-            table.RemoveByValue(ply.Enemies, npc)
+            if ply == inflictor then
+                ply.BulletTimeAmt = ply.BulletTimeAmt + slomoKillRecovery
+                ply.BulletTimeAmt = math.min(ply.BulletTimeAmt, 1.0)
+
+                -- Hack - if we have almost full BT just round it up
+                if ply.BulletTimeAmt >= 0.95 then
+                    ply.BulletTimeAmt = 1.0
+                end
+
+                -- Allow for a temporary overcharge for kills in bullet time
+                if ply.BulletTimeActive then
+                    ply.OverchargeBulletTimeAmt = ply.OverchargeBulletTimeAmt + slomoOverchargeAmt
+                    ply.OverchargeBulletTimeAmt = math.min(ply.OverchargeBulletTimeAmt, 1.0)
+                end
+            end
         end
+    end
+
+    local function Dissolve(wep, type)
+        local dissolverEnt = ents.Create("env_entity_dissolver")
+        timer.Simple(5, function()
+            if IsValid(dissolverEnt) then
+                dissolverEnt:Remove()
+            end
+        end)
+    
+        dissolverEnt.Target = "dissolve" .. wep:EntIndex()  
+        dissolverEnt:SetKeyValue("dissolvetype", type)
+        dissolverEnt:SetKeyValue("magnitude", 0)
+        dissolverEnt:SetPos(npc:GetPos())
+        dissolverEnt:Spawn()
+
+        wep:SetName(dissolverEnt.Target)
+
+        dissolverEnt:Fire("Dissolve", dissolverEnt.Target, 0)
+        dissolverEnt:Fire("Kill", "", 0.1)
+    end
+
+    if cvar.DisintegrateDroppedWeapons:GetBool() then
+        local nearbyEntities = ents.FindInSphere(npc:GetPos(), 100)
+        for i, entity in ipairs(nearbyEntities) do
+            if entity:GetOwner() == npc then
+                entity.Dissolving = true
+                Dissolve(entity, 0)
+            end
+        end
+    end
+end)
+
+hook.Add("EntityTakeDamage", "agility_ScalePlayerDamage", function(ent, dmgInfo)
+    local dmgType = dmgInfo:GetDamageType()
+    if ent:IsPlayer() and playerDmgTypesToScale[dmgType] then
+        dmgInfo:ScaleDamage(cvar.PlayerDamageMultiplier:GetFloat())
+    end
+end)
+
+hook.Add("OnEntityCreated", "agility_ScaleNPCHealth", function(ent)
+    if ent:IsNPC() then
+        -- `Activate()` can result in health getting set, so adjust it on the next tick
+        timer.Simple(0.01, function()
+            if IsValid(ent) then
+                ent:SetMaxHealth(ent:GetMaxHealth() * cvar.NpcHealthMultiplier:GetFloat())
+                ent:SetHealth(ent:Health() * cvar.NpcHealthMultiplier:GetFloat())
+            end
+        end)
     end
 end)
 
 concommand.Add("bullet_time", function(ply, cmd, args)
-    if game.GetTimeScale() ~= 1 then
-        game.SetTimeScale(1)
-
-        ply:SetWalkSpeed(ply.OldWalkSpeed)
-        ply:SetRunSpeed(ply.OldRunSpeed)
-    else
-        game.SetTimeScale(slomoTimescale)
-
-        ply.OldWalkSpeed = ply:GetWalkSpeed()
-        ply.OldRunSpeed = ply:GetRunSpeed()
-
-        ply:SetWalkSpeed(ply.OldWalkSpeed * slomoSpeedMultiplier)
-        ply:SetRunSpeed(ply.OldRunSpeed * slomoSpeedMultiplier)
+    if not ply.BulletTimeActive and not ply.IsShootDodging then
+        StartBulletTime(ply)
+    elseif ply.TimeToAllowBTEnd and (RealTime() > ply.TimeToAllowBTEnd) then
+        StopBulletTime(ply)
     end
-
-    ply.OldTimeScale = game.GetTimeScale()
 end)
