@@ -11,7 +11,9 @@ local cvars = {
     BulletEnableDamageScale = CreateConVar("agility_bullet_headshots_enabled", 0, { FCVAR_REPLICATED, FCVAR_ARCHIVE }, "Enables custom damage scaling for bullets, essentially makes headshots do double damage"),
 
     PlayerDamageMultiplier = CreateConVar("agility_player_dmg_multiplier", 1.0, { FCVAR_REPLICATED, FCVAR_ARCHIVE }, "Scales the amount of damage that the player takes from bullets. Is applied even if projectile bullets are disabled"),
+    NpcDamageMultiplier = CreateConVar("agility_npc_dmg_multiplier", 1.0, { FCVAR_REPLICATED, FCVAR_ARCHIVE }, "Scales the amount of damage that NPCs take from players. Is applied even if projectile bullets are disabled"),
     NpcHealthMultiplier = CreateConVar("agility_npc_health_multiplier", 1.0, { FCVAR_REPLICATED, FCVAR_ARCHIVE }, "Scales the amount of health for spawned NPCs"),
+    ModernWarfareDamageMultiplier = CreateConVar("agility_mg_dmg_multiplier", 1.0, { FCVAR_REPLICATED, FCVAR_ARCHIVE }, "Scales the amount of damage from modern warfare SWEPs. Scratches a personal itch"),
 
     DisintegrateDroppedWeapons = CreateConVar("agility_disintegrate_dropped_wepaons", 0, { FCVAR_REPLICATED, FCVAR_ARCHIVE }, "When NPCs die, their dropped weapons are disintegrated"),
     InfiniteBulletTime = CreateConVar("agility_infinite_slomo", 0, { FCVAR_CHEAT, FCVAR_REPLICATED }, "Disables bullet-time draining, granting you unlimited bullet-time"),
@@ -20,6 +22,7 @@ local cvars = {
 if CLIENT then
     table.Merge(cvars, {
         HideKillFeedInSP = CreateClientConVar("agility_cl_hide_killfeed_singleplayer", 1, true, false, "If non-zero, hides the killfeed in single player but keeps it on for multiplayer"),
+        EnableDamageIndicator = CreateClientConVar("agility_cl_enable_damage_indicator", 1, true, false, "If non-zero, enables the vanilla red screen damage effect"),
     })
 end
 

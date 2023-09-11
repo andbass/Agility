@@ -32,23 +32,27 @@ local slidingSlopeBoost = 1000
 local shootDodgeSpeed = 580
 local shootDodgeUpwardSpeed = 160
 local shootDodgeStandUpDelay = 1.5
-local shootDodgeSlomoCost = 0.1
+local shootDodgeSlomoCost = 0.125
 
 local slomoTimescale = 0.2
 local slomoShootDodgeTimescale = 0.1
 local slomoTransitionSpeed = 10.0
-local slomoSpeedMultiplier = 1.0
+local slomoSpeedMultiplier = 1.2
 
-local slomoDrainRate = 0.075
-local slomoKillRecovery = 0.25
+local slomoDrainRate = 0.1
+local slomoKillRecovery = 0.2
 local slomoOverchargeAmt = 0.15
 
-local playerDmgTypesToScale = {
-    [DMG_BULLET] = true,
-    [DMG_SLASH] = true,
-    [DMG_CLUB] = true,
-    [DMG_SONIC] = true,
-}
+local playerDmgTypesToScale = bit.bor(
+    DMG_BULLET,
+    DMG_BUCKSHOT,
+    DMG_SNIPER,
+    DMG_MISSILEDEFENSE,
+    DMG_SLASH,
+    DMG_CLUB,
+    DMG_SONIC,
+    DMG_DISSOLVE
+)
 
 local ledgeImpactSounds = {}
 for i = 1, 6 do
@@ -213,8 +217,12 @@ local function LedgeTick(ply, moveData)
         moveData:SetOrigin(ply.GrabbedPos)
         moveData:SetVelocity(Vector(0, 0, 0))
     elseif ply.GrabbedLedge and ply.LedgeTrace.Entity then 
-        moveData:SetOrigin(ply.GrabbedRelativePos + ply.LedgeTrace.Entity:GetPos())
-        moveData:SetVelocity(ply.LedgeTrace.Entity:GetVelocity())
+        if IsValid(ply.LedgeTrace.Entity) then
+            moveData:SetOrigin(ply.GrabbedRelativePos + ply.LedgeTrace.Entity:GetPos())
+            moveData:SetVelocity(ply.LedgeTrace.Entity:GetVelocity())
+        else
+            DeattachFromLedge(ply) 
+        end
     end
 end
 
@@ -266,17 +274,11 @@ local function StopSliding(ply)
 end
 
 local function SlidingTick(ply, moveData)
+    moveData:SetForwardSpeed(0)
+    moveData:SetSideSpeed(0)
+
     -- Subtracts forward vector to simulate friction
     local vel = ply.SlideVel or ply.SlideDir * ply.SlideSpeed
-
-    if ply:OnGround() then
-        local traceGround = util.TraceLine(util.GetPlayerTrace(ply, Vector(0, 0, -1)))
-        local velBoost = slidingSlopeBoost * traceGround.HitNormal:Dot(ply.SlideDir)
-
-        vel = vel + ply.SlideDir * velBoost * FrameTime() - ply.SlideDir * slidingSlowdown * FrameTime()
-    else 
-        ply.SlideTime = CurTime()
-    end
 
     local forwardness = ply:GetForward():Dot(ply.SlideDir)
     local rollDir = ply:GetForward():Dot(ply.RightSlideDir) > 0 and 1 or -1
@@ -291,13 +293,19 @@ local function SlidingTick(ply, moveData)
     ply:SetEyeAngles(newAngle)
     
     -- If our speed gets low due to collision or friction, just stop sliding
-    if vel:GetNormalized():Dot(ply.SlideDir) < 0 then
-        moveData:SetVelocity(Vector())
-    else 
-        moveData:SetVelocity(vel)
-    end
+    if ply:OnGround() then
+        local traceGround = util.TraceLine(util.GetPlayerTrace(ply, Vector(0, 0, -1)))
+        local velBoost = slidingSlopeBoost * traceGround.HitNormal:Dot(ply.SlideDir)
 
-    ply.SlideVel = vel
+        vel = vel + ply.SlideDir * velBoost * FrameTime() - ply.SlideDir * slidingSlowdown * FrameTime()
+        if vel:GetNormalized():Dot(ply.SlideDir) < 0 then
+            moveData:SetVelocity(Vector())
+        else 
+            moveData:SetVelocity(vel)
+        end
+
+        ply.SlideVel = vel
+    end
 end
 
 local function StartBulletTime(ply)
@@ -317,6 +325,10 @@ local function StartBulletTime(ply)
 
     ply:SetWalkSpeed(ply.OldWalkSpeed * slomoSpeedMultiplier)
     ply:SetRunSpeed(ply.OldRunSpeed * slomoSpeedMultiplier)
+    if ply:IsSprinting() then
+        ply:SetMaxSpeed(ply.OldRunSpeed * slomoSpeedMultiplier)
+    end
+
     ply:AddEFlags(EFL_NO_DAMAGE_FORCES)
 
     net.Start("BulletTimeStarted")
@@ -342,6 +354,9 @@ local function StopBulletTime(ply)
 
     ply:SetWalkSpeed(ply.OldWalkSpeed)
     ply:SetRunSpeed(ply.OldRunSpeed)
+    if ply:IsSprinting() then
+        ply:SetMaxSpeed(ply.OldRunSpeed)
+    end
     
     if not ply.IsShootDodging then
         ply:RemoveEFlags(EFL_NO_DAMAGE_FORCES)
@@ -545,9 +560,6 @@ local function ShootDodgeTick(ply, moveData)
 end
 
 local function PlayerTick(ply, moveData)
-    ply:SetWalkSpeed(150)  
-    ply:SetRunSpeed(250)
-
     BulletTimeTick(ply)
 
     if ply.ForceDuckCheckTime then
@@ -574,21 +586,17 @@ local function PlayerTick(ply, moveData)
         else
             ShootDodgeTick(ply, moveData)
         end
-    end
-
-    if not ply:OnGround() and ply:GetMoveType() ~= MOVETYPE_LADDER and ply:GetMoveType() ~= MOVETYPE_NOCLIP then
+    elseif ply.IsSliding then
+        if ply:OnGround() and CurTime() > ply.TimeToCheckSlide and (not ply:Crouching() or not ply:KeyDown(IN_DUCK)) then
+            StopSliding(ply)
+        else
+            SlidingTick(ply, moveData)
+        end
+    elseif not ply:OnGround() and not ply:KeyDown(IN_DUCK) and ply:GetMoveType() ~= MOVETYPE_LADDER and ply:GetMoveType() ~= MOVETYPE_NOCLIP then
         local ledgeTrace = LedgeTrace(ply)
 
         if IsLedgeDetected(ply, ledgeTrace) then
             AttachToLedge(ply, ledgeTrace)
-        end
-    elseif ply:OnGround() then
-        if ply.IsSliding then
-            if CurTime() > ply.TimeToCheckSlide and (not ply:Crouching() or not ply:KeyDown(IN_DUCK)) then
-                StopSliding(ply)
-            else 
-                SlidingTick(ply, moveData)
-            end
         end
     end
 end
@@ -601,8 +609,17 @@ hook.Add("PlayerSpawn", "agility_PlayerSpawn", function(ply, transition)
     ply.BulletTimeAmt = transition and ply.BulletTimeAmt or 1.0
     ply.OverchargeBulletTimeAmt = transition and ply.OverchargeBulletTimeAmt or 0.0
 
-    -- Fix eyes in stomach issue when crouching
-    ply:SetViewOffsetDucked(Vector(0, 0, 40))
+    timer.Simple(0, function()
+        -- Fix eyes in stomach issue when crouching
+        ply:SetViewOffsetDucked(Vector(0, 0, 40))
+
+        --ply:SetWalkSpeed(150)
+        --ply:SetRunSpeed(250)
+        ply:SetWalkSpeed(190)
+        ply:SetRunSpeed(320)
+        ply:SetCrouchedWalkSpeed(0.5)
+        ply:SetJumpPower(math.sqrt(2.0 * physenv.GetGravity():Length() * 21.0))
+    end)
 end)
 
 hook.Add("PlayerDeath", "agility_PlayerDeath", function(ply, inflictor, attacker)
@@ -715,7 +732,7 @@ hook.Add("OnNPCKilled", "agility_NPCKilled", function(npc, inflictor)
     if cvar.DisintegrateDroppedWeapons:GetBool() then
         local nearbyEntities = ents.FindInSphere(npc:GetPos(), 100)
         for i, entity in ipairs(nearbyEntities) do
-            if entity:GetOwner() == npc then
+            if entity:GetOwner() == npc and not entity:IsNPC() and entity:GetClass() ~= "npc_grenade_frag" and entity:GetClass() ~= "raggib" then
                 entity.Dissolving = true
                 Dissolve(entity, 0)
             end
@@ -723,10 +740,20 @@ hook.Add("OnNPCKilled", "agility_NPCKilled", function(npc, inflictor)
     end
 end)
 
+-- TODO rename hook
 hook.Add("EntityTakeDamage", "agility_ScalePlayerDamage", function(ent, dmgInfo)
+    local inflictor = dmgInfo:GetInflictor()
+    local owner = inflictor:GetOwner()
+
+    if inflictor:GetClass():find("mg_") == 1 then
+        dmgInfo:ScaleDamage(cvar.ModernWarfareDamageMultiplier:GetFloat())
+    end
+
     local dmgType = dmgInfo:GetDamageType()
-    if ent:IsPlayer() and playerDmgTypesToScale[dmgType] then
+    if ent:IsPlayer() and bit.band(playerDmgTypesToScale, dmgType) > 0 then
         dmgInfo:ScaleDamage(cvar.PlayerDamageMultiplier:GetFloat())
+    elseif ent:IsNPC() and (inflictor:IsPlayer() or (IsValid(owner) and owner:IsPlayer())) then
+        dmgInfo:ScaleDamage(cvar.NpcDamageMultiplier:GetFloat())
     end
 end)
 
@@ -748,4 +775,8 @@ concommand.Add("bullet_time", function(ply, cmd, args)
     elseif ply.TimeToAllowBTEnd and (RealTime() > ply.TimeToAllowBTEnd) then
         StopBulletTime(ply)
     end
+end)
+
+concommand.Add("strip_weapons", function(ply, cmd, args)
+    ply:StripWeapons()
 end)

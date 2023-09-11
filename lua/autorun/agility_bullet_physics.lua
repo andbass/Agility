@@ -121,9 +121,12 @@ end
 
 hook.Add("EntityFireBullets", "agility_FireBullets", function(ent, data)
     if CLIENT and not IsFirstTimePredicted() then return true end
+
     if not cvars.BulletEnable:GetBool() then return true end
     if cvars.BulletNpcOnly:GetBool() and not ent:IsNPC() then return true end
     if cvars.BulletSlomoOnly:GetBool() and not BulletTimeEnabled() then return true end
+    
+    if ent:GetClass():find("ent_mp1") == 1 then return true end
     
     -- Avoids recursive calls
     -- This is a bad hack lmao

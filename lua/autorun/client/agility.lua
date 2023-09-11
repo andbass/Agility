@@ -70,7 +70,7 @@ local function ViewModelLedgeGrab(weapon, vm, oldPos, oldAng, pos, ang)
     return pos, interpAng
 end
 
-hook.Add("CalcViewModelView", "agility_cl_ViewModel", ViewModelLedgeGrab)
+--hook.Add("CalcViewModelView", "agility_cl_ViewModel", ViewModelLedgeGrab)
 
 ---
 -- Kill feed disable
@@ -273,4 +273,10 @@ local bulletTimeBlur = 0.1
 
 hook.Add("GetMotionBlurValues", "agility_cl_GetMotionBlurValues", function(hor, vert, forward, rot)
     return hor, vert, forward + bulletTimeBlur * bulletTimeEffectsAmt, rot
+end)
+
+hook.Add("HUDShouldDraw", "agility_cl_HUDShouldDraw", function(name)
+    if not cvar.EnableDamageIndicator:GetBool() and name == "CHudDamageIndicator" then
+        return false
+    end
 end)
